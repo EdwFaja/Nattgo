@@ -1,4 +1,5 @@
 from flask import Flask, render_template, request, redirect, session, url_for, flash
+from flask import jsonify
 import os
 from werkzeug.utils import secure_filename
 from babel.numbers import format_currency
@@ -16,6 +17,8 @@ database = mysql.connector.connect(
     db="nattgo"
 )
 
+def get_db():
+    return database
 
 # Directorio donde se guardarán las imágenes
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif'}
@@ -68,10 +71,12 @@ def productos_urs():
         if 'carrito' not in session:
             session['carrito'] = []
 
-
-        producto_id = request.form['id_producto']
+        producto_id = request.form.get('id_producto', None)
         nombre_producto = request.form['nombre_producto']
         precio_producto = request.form['precio_producto']
+
+        if not producto_id:
+            return jsonify({"success": False, "message": "Error al agregar el producto al carrito. Campo 'id_producto' no encontrado."}), 400
 
         item_carrito = {
             'id': producto_id,
@@ -83,17 +88,65 @@ def productos_urs():
         session['carrito'].append(item_carrito)
         session.modified = True
 
-        return 'Producto agregado al carrito'
+        return jsonify({'success': True, 'producto': item_carrito})
 
     else:
         productos = obtener_productos()
         for producto in productos:
             if isinstance(producto['imgproductos'], bytes):
                 producto['imgproductos'] = producto['imgproductos'].decode('utf-8')
-            # Formatear el precio a pesos colombianos
             producto['valorproducto'] = format_currency(producto['valorproducto'], 'COP', locale='es_CO')
 
         return render_template('/clients/productos_urs.html', productos=productos)
+
+@app.route('/guardar_pedido', methods=['POST'])
+def guardar_pedido():
+    productos = session.get('carrito', [])
+    if not productos:
+        return jsonify({'success': False, 'message': 'El carrito está vacío'})
+
+    if 'user_id' not in session:
+        return jsonify({'success': False, 'message': 'Usuario no autenticado'})
+
+    def normalizar_precio(precio):
+        # Eliminar puntos como separadores de miles y reemplazar coma por punto
+        precio_limpio = precio.replace('.', '').replace(',', '.')
+        # Eliminar símbolo de moneda si está presente
+        if precio_limpio.startswith('$'):
+            precio_limpio = precio_limpio[1:]
+        return float(precio_limpio)
+
+    total_venta = sum(normalizar_precio(p['precio']) * int(p['cantidad']) for p in productos)
+
+    db = get_db()
+    cursor = db.cursor()
+
+    try:
+        cursor.execute("""
+            INSERT INTO ventas (fechaventa, precioventa, estadoventa, totalventa, idusuario, idproducto)
+            VALUES (%s, %s, %s, %s, %s, %s)
+        """, (datetime.now().date(), total_venta, 'ESPERA', total_venta, session['user_id'], productos[0]['id']))  # Usamos el primer producto para idproducto
+        venta_id = cursor.lastrowid
+
+        # Guardar detalles de los productos en la tabla detalleventas
+        for producto in productos:
+            cursor.execute("""
+                INSERT INTO detalleventas (idventa, cantidadproducto, subtotaldetalleventa)
+                VALUES (%s, %s, %s)
+            """, (venta_id, int(producto['cantidad']), normalizar_precio(producto['precio']) * int(producto['cantidad'])))
+
+        db.commit()
+    except mysql.connector.Error as err:
+        db.rollback()
+        return jsonify({'success': False, 'message': 'Error al guardar el pedido: {}'.format(err)})
+    finally:
+        cursor.close()
+
+    session.pop('carrito', None)  # Limpiar el carrito después de guardar el pedido
+
+    return jsonify({'success': True, 'message': 'Pedido guardado correctamente'})
+
+
 
 @app.route('/nosotros')
 def nosotros():
