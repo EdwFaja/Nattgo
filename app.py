@@ -122,18 +122,37 @@ def guardar_pedido():
     cursor = db.cursor()
 
     try:
+        # Verificar el stock de cada producto antes de guardar la venta
+        for producto in productos:
+            cursor.execute("SELECT stockinventario FROM inventario WHERE idproducto = %s", (producto['id'],))
+            result = cursor.fetchone()
+            if result is None:
+                return jsonify({'success': False, 'message': 'Producto no encontrado en el inventario'})
+
+            stock_actual = result[0]
+            if stock_actual < int(producto['cantidad']):
+                return jsonify({'success': False, 'message': f'No hay suficiente stock para el producto {producto["nombre"]}. Stock actual: {stock_actual}'})
+
+        # Insertar la venta en la tabla ventas
         cursor.execute("""
             INSERT INTO ventas (fechaventa, precioventa, estadoventa, totalventa, idusuario, idproducto)
             VALUES (%s, %s, %s, %s, %s, %s)
         """, (datetime.now().date(), total_venta, 'ESPERA', total_venta, session['user_id'], productos[0]['id']))  # Usamos el primer producto para idproducto
         venta_id = cursor.lastrowid
 
-        # Guardar detalles de los productos en la tabla detalleventas
+        # Guardar detalles de los productos en la tabla detalleventas y actualizar el stock
         for producto in productos:
             cursor.execute("""
                 INSERT INTO detalleventas (idventa, cantidadproducto, subtotaldetalleventa)
                 VALUES (%s, %s, %s)
             """, (venta_id, int(producto['cantidad']), normalizar_precio(producto['precio']) * int(producto['cantidad'])))
+
+            # Actualizar el stock en la tabla inventario
+            cursor.execute("""
+                UPDATE inventario
+                SET stockinventario = stockinventario - %s
+                WHERE idproducto = %s
+            """, (int(producto['cantidad']), producto['id']))
 
         db.commit()
     except mysql.connector.Error as err:
@@ -145,7 +164,6 @@ def guardar_pedido():
     session.pop('carrito', None)  # Limpiar el carrito después de guardar el pedido
 
     return jsonify({'success': True, 'message': 'Pedido guardado correctamente'})
-
 
 
 @app.route('/nosotros')
@@ -238,17 +256,86 @@ def dashboard():
 
 @app.route('/ventas')
 def ventas():
+    db = get_db()
+    cursor = db.cursor(dictionary=True)
+    cursor.execute("""
+        SELECT ventas.idventa, usuarios.nombreusuario, ventas.fechaventa, ventas.estadoventa, ventas.totalventa
+        FROM ventas
+        JOIN usuarios ON ventas.idusuario = usuarios.idusuario
+    """)
+    ventas = cursor.fetchall()
+    cursor.close()
+
+    return render_template('ventas.html', ventas=ventas)
+
+
+@app.route('/comprobante/<int:id>')
+def obtener_comprobante(id):
+    db = get_db()
+    cursor = db.cursor(dictionary=True)
     
+    try:
+        cursor.execute("""
+            SELECT ventas.idventa, usuarios.nombreusuario, ventas.fechaventa, ventas.estadoventa, ventas.totalventa
+            FROM ventas
+            JOIN usuarios ON ventas.idusuario = usuarios.idusuario
+            WHERE ventas.idventa = %s
+        """, (id,))
+        venta = cursor.fetchone()
+        print("Venta obtenida:", venta)  # Mensaje de depuración
+
+        if not venta:
+            cursor.close()
+            print("Venta no encontrada")  # Mensaje de depuración
+            return jsonify({'success': False, 'message': 'Venta no encontrada'}), 404
+
+        cursor.execute("""
+            SELECT productos.nombreproducto, detalleventas.cantidadproducto, detalleventas.subtotaldetalleventa
+            FROM detalleventas
+            JOIN ventas ON detalleventas.idventa = ventas.idventa
+            JOIN productos ON ventas.idproducto = productos.idproducto
+            WHERE detalleventas.idventa = %s
+        """, (id,))
+        detalles = cursor.fetchall()
+        print("Detalles obtenidos:", detalles)  # Mensaje de depuración
+
+    except mysql.connector.Error as err:
+        print("Error en la consulta:", err)  # Mensaje de depuración
+        return jsonify({'success': False, 'message': 'Error en la consulta: {}'.format(err)}), 500
+
+    finally:
+        cursor.close()
     
-    
-    
-    
-    
-    
-    
-    
-    
-    return render_template('ventas.html')
+    return jsonify({'success': True, 'venta': venta, 'detalles': detalles})
+
+@app.route('/actualizarEstadoVenta/<int:id>', methods=['PUT'])
+def actualizar_estado_venta(id):
+    try:
+        # Obtener el estado nuevo de la venta desde los datos enviados por el cliente
+        nuevo_estado = request.json.get('estado', None)
+        if not nuevo_estado:
+            return jsonify({'success': False, 'message': 'Estado no proporcionado'}), 400
+
+        # Actualizar el estado de la venta en la base de datos
+        db = get_db()
+        if db:
+            cursor = db.cursor()
+            cursor.execute("""
+                UPDATE ventas
+                SET estadoventa = %s
+                WHERE idventa = %s
+            """, (nuevo_estado, id))
+            db.commit()
+            cursor.close()
+            db.close()  # Cerrar la conexión después de usarla
+
+            return jsonify({'success': True, 'message': f'Estado de venta actualizado a {nuevo_estado}'}), 200
+        else:
+            return jsonify({'success': False, 'message': 'Error de conexión a la base de datos'}), 500
+
+    except Exception as e:
+        print(f'Error al actualizar estado de venta: {str(e)}')
+        return jsonify({'success': False, 'message': 'Error al actualizar el estado de la venta'}), 500
 
 
 @app.route('/inventario', methods=['GET', 'POST'])

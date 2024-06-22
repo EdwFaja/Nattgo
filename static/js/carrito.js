@@ -25,6 +25,9 @@ function agregarAlCarritoClicked(event) {
         } else {
             alert("Error al agregar el producto al carrito: " + data.message);
         }
+    }).catch(error => {
+        console.error('Error:', error);
+        alert('Error al agregar el producto al carrito.');
     });
 }
 
