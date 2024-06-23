@@ -18,6 +18,12 @@
         integrity="sha384-geWF76RCwLtnZ8qwWowPQNguL3RmwHVBC9FhGdlKrxdiJJigb/j/68SIy3Te4Bkz"
         crossorigin="anonymous"></script>
     <script src="{{ url_for('static', filename='js/validacionI.js') }}"></script>
+    <script>
+        const urlParams = new URLSearchParams(window.location.search);
+        if (urlParams.has('session_iniciada')) {
+            alert('Inicio de sesión exitoso');
+        }
+    </script>
 </head>
 
 <body>

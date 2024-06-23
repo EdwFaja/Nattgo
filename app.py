@@ -202,10 +202,11 @@ def inicioSesion():
             session['user_id'] = user[0]
             session['user_name'] = user[3]
 
+            # Redirigir con el parámetro de sesión iniciada
             if user[2] == 2:
-                return redirect(url_for('dashboard'))
+                return redirect(url_for('dashboard', session_iniciada=True))
             else:
-                return redirect(url_for('index_urs'))
+                return redirect(url_for('index_urs', session_iniciada=True))
         else:
             return render_template('inicioSesion.html', error="Usuario o contraseña incorrectos")
 
@@ -214,9 +215,7 @@ def inicioSesion():
 
 @app.route('/registrarse', methods=['GET', 'POST'])
 def registrar():
-
     if request.method == 'POST':
-
         idciudad = request.form['id_ciudad']
         correo = request.form['correo']
         contraseña = request.form['password']
@@ -227,21 +226,31 @@ def registrar():
         id_rol = 1
 
         cursor = database.cursor()
-        sql = "INSERT INTO usuarios (nombreusuario, apellidousuario, telefonousuario, emailusuario, fechanacimientousuario, contraseñausuario, idrol, idciudad) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)"
-        data = (nombre_usuario, apellidos_usuario, telefono_usuario,
-                correo, fechanacimientousuario, contraseña, id_rol, idciudad)
+        # Verificar si el correo ya está registrado
+        sql_check = "SELECT idusuario FROM usuarios WHERE emailusuario = %s"
+        cursor.execute(sql_check, (correo,))
+        user = cursor.fetchone()
+
+        if user:
+            cursor.close()
+            return redirect(url_for('registrar', error="Correo ya registrado"))
+
+        sql = """
+        INSERT INTO usuarios (nombreusuario, apellidousuario, telefonousuario, emailusuario, fechanacimientousuario, contraseñausuario, idrol, idciudad)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        """
+        data = (nombre_usuario, apellidos_usuario, telefono_usuario, correo, fechanacimientousuario, contraseña, id_rol, idciudad)
         cursor.execute(sql, data)
         database.commit()
         cursor.close()
 
-        return render_template('iniciosesion.html')
+        return redirect(url_for('registrar', registro_exitoso=True))
     else:
         cursor = database.cursor()
         cursor.execute("SELECT idciudad, nombreciudad FROM ciudades")
         ciudades = cursor.fetchall()
-
         cursor.close()
-    return render_template('registrar.html', ciudades=ciudades)
+        return render_template('registrar.html', ciudades=ciudades)
 
 
 @app.route('/contraseña')
