@@ -5,6 +5,7 @@ from werkzeug.utils import secure_filename
 from babel.numbers import format_currency
 from datetime import datetime
 import mysql.connector
+from flask_mail import Mail, Message
 
 app = Flask(__name__)
 app.secret_key = 'your_secret_key'
@@ -16,18 +17,29 @@ database = mysql.connector.connect(
     passwd="",
     db="nattgo"
 )
+# Configuración de Flask-Mail
+app.config['MAIL_SERVER'] = 'smtp.gmail.com'
+app.config['MAIL_PORT'] = 587
+app.config['MAIL_USE_TLS'] = True
+app.config['MAIL_USE_SSL'] = False
+app.config['MAIL_USERNAME'] = 'nattgou@gmail.com'
+app.config['MAIL_PASSWORD'] = 'MVLV EE ZS VZCF Q KOJ'
+app.config['MAIL_DEFAULT_SENDER'] = 'nattgou@gmail.com'
+
+mail = Mail(app)
 
 def get_db():
     return database
 
 # Directorio donde se guardarán las imágenes
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif'}
-app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER = 'C:/Users/esant/OneDrive/Escritorio/Gono/src/static/uploads'
 
+app.config['UPLOAD_FOLDER'] = os.path.join('src', 'static', 'uploads')
 
 def allowed_file(filename):
     ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif'}
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
 def obtener_productos():
     cursor = database.cursor(dictionary=True)
     cursor.execute("SELECT * FROM productos")
@@ -176,10 +188,38 @@ def nosotros_urs():
     return render_template('/clients/nosotros_urs.html')
 
 
+@app.route('/enviar_contacto', methods=['POST'])
+def enviar_contacto():
+    if request.method == 'POST':
+        nombre = request.form['name']
+        email = request.form['email']
+        telefono = request.form['phone']
+        mensaje = request.form['message']
+
+        msg = Message('Mensaje de Contacto',
+                      sender=app.config['MAIL_DEFAULT_SENDER'],
+                      recipients=['nattgou@gmail.com'])
+        msg.body = f'''
+        Nombre: {nombre}
+        Email: {email}
+        Teléfono: {telefono}
+        Mensaje:
+        {mensaje}
+        '''
+
+        try:
+            mail.send(msg)
+            flash('Mensaje enviado correctamente', 'success')
+        except Exception as e:
+            flash(f'Error al enviar el mensaje: {str(e)}', 'danger')
+
+        return redirect(url_for('contacto'))
+
+    return redirect(url_for('contacto'))
+
 @app.route('/contacto')
 def contacto():
     return render_template('contacto.html')
-
 
 @app.route('/contacto_urs')
 def contacto_urs():
@@ -253,10 +293,26 @@ def registrar():
         return render_template('registrar.html', ciudades=ciudades)
 
 
-@app.route('/contraseña')
+@app.route('/contraseña', methods=['GET', 'POST'])
 def contraseña():
-    return render_template('contraseña.html')
+    if request.method == 'POST':
+        correo = request.form['correo']
+        cursor = database.cursor(dictionary=True)
+        cursor.execute("SELECT * FROM usuarios WHERE emailusuario = %s", (correo,))
+        usuario = cursor.fetchone()
 
+        if usuario:
+            # Envía el correo con la contraseña
+            msg = Message('Recuperación de Contraseña', recipients=[correo])
+            msg.body = f"Tu contraseña es: {usuario['contraseñausuario']}"
+            mail.send(msg)
+            flash('Correo enviado con la contraseña', 'success')
+        else:
+            flash('Correo no encontrado en la base de datos', 'danger')
+
+        return redirect(url_for('contraseña'))
+
+    return render_template('contraseña.html')
 
 @app.route('/dashboard')
 def dashboard():
@@ -354,7 +410,7 @@ def inventario():
     if request.method == 'POST':
         form_data = request.form
 
-        if 'nombreproducto' in form_data:
+        if 'nombreproducto' in form_data and 'idproducto' not in form_data:
             # Manejar la creación de un nuevo producto con imagen
             file = request.files.get('imgproductos')
             if file and allowed_file(file.filename):
@@ -458,6 +514,7 @@ def inventario():
             flash('Proveedor creado con éxito')
 
         elif 'idproducto' in form_data:
+            print("Editando producto")
             # Manejar la edición de un producto
             idproducto = form_data['idproducto']
             nombreproducto = form_data['nombreproducto']
@@ -466,11 +523,13 @@ def inventario():
 
             # Verificar si se cargó una nueva imagen
             if imagen_producto and allowed_file(imagen_producto.filename):
+                print("Nueva imagen cargada")
                 # Guardar la nueva imagen en el servidor
                 filename = secure_filename(imagen_producto.filename)
                 filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
                 imagen_producto.save(filepath)
             else:
+                print("Conservar imagen existente")
                 # Conservar la imagen existente
                 cursor.execute("SELECT imgproductos FROM productos WHERE idproducto = %s", (idproducto,))
                 imagen_actual = cursor.fetchone()['imgproductos']
@@ -528,6 +587,15 @@ def inventario():
     for item in inventario:
         item['valorproducto'] = format_currency(item['valorproducto'], 'COP', locale='es_CO')
     return render_template('inventario.html', data=inventario, proveedores=proveedores, categorias=categorias, tallas=tallas, productos=productos)
+
+@app.route('/consultas', methods=['GET'])
+def consultas():
+    
+        cursor = database.cursor(dictionary=True) 
+        cursor.execute("SELECT idproveedor, nombreproveedor, direccionproveedor, telefonoproveedor FROM proveedor")
+        proveedores = cursor.fetchall()
+        cursor.close()
+        return render_template('consultas.html', proveedores=proveedores)  
 
 if __name__ == '__main__':
     app.run(debug=True, port=4000)
