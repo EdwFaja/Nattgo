@@ -1,8 +1,11 @@
 from flask import Flask, render_template, request, redirect, session, url_for, flash
 from flask import jsonify
+import json
 import os
 from werkzeug.utils import secure_filename
 from babel.numbers import format_currency
+import mysql.connector
+from mysql.connector import Error
 from datetime import datetime
 import mysql.connector
 from flask_mail import Mail, Message
@@ -29,7 +32,18 @@ app.config['MAIL_DEFAULT_SENDER'] = 'nattgou@gmail.com'
 mail = Mail(app)
 
 def get_db():
-    return database
+    try:
+        connection = mysql.connector.connect(
+            host="localhost",
+            user="root",
+            passwd="",
+            db="nattgo"
+        )
+        if connection.is_connected():
+            return connection
+    except Error as e:
+        print("Error al conectar a la base de datos:", e)
+        return None
 
 # Directorio donde se guardarán las imágenes
 ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif'}
@@ -83,37 +97,76 @@ def productos_urs():
         if 'carrito' not in session:
             session['carrito'] = []
 
-        producto_id = request.form.get('id_producto', None)
-        nombre_producto = request.form['nombre_producto']
-        precio_producto = request.form['precio_producto']
+        producto_id = request.form.get('id_producto')
+        nombre_producto = request.form.get('nombre_producto')
+        precio_producto = request.form.get('precio_producto')
 
-        if not producto_id:
-            return jsonify({"success": False, "message": "Error al agregar el producto al carrito. Campo 'id_producto' no encontrado."}), 400
+        # Verificar si todos los campos necesarios están presentes
+        if not producto_id or not nombre_producto or not precio_producto:
+            return jsonify({"success": False, "message": "Faltan campos necesarios en la solicitud."}), 400
 
-        item_carrito = {
-            'id': producto_id,
-            'nombre': nombre_producto,
-            'precio': precio_producto,
-            'cantidad': 1
-        }
+        # Validar que el ID del producto sea un número entero válido
+        try:
+            producto_id = int(producto_id)
+        except ValueError:
+            return jsonify({"success": False, "message": "ID de producto inválido."}), 400
 
-        session['carrito'].append(item_carrito)
-        session.modified = True
+        # Verificar si el producto con ese ID existe en el inventario y su stock
+        try:
+            cursor = database.cursor(dictionary=True)
+            cursor.execute("SELECT stockinventario FROM inventario WHERE idproducto = %s", (producto_id,))
+            stock = cursor.fetchone()
 
-        return jsonify({'success': True, 'producto': item_carrito})
+            if stock is None:
+                return jsonify({"success": False, "message": "Producto no encontrado en el inventario."}), 404
+
+            stock_disponible = stock['stockinventario']
+            if stock_disponible < 1:
+                return jsonify({"success": False, "message": f"No hay suficiente stock para el producto {nombre_producto}. Stock actual: {stock_disponible}"}), 400
+
+            # Preparar el objeto del producto para agregar al carrito
+            item_carrito = {
+                'id': producto_id,
+                'nombre': nombre_producto,
+                'precio': precio_producto,
+                'cantidad': 1
+            }
+
+            session['carrito'].append(item_carrito)
+            session.modified = True
+
+            return jsonify({'success': True, 'producto': item_carrito})
+
+        except Error as e:
+            return jsonify({"success": False, "message": f"Error al consultar la base de datos: {str(e)}"}), 500
+
+    elif request.method == 'GET':
+        try:
+            productos = obtener_productos()  # Asumiendo que tienes una función obtener_productos() definida
+            for producto in productos:
+                if isinstance(producto['imgproductos'], bytes):
+                    producto['imgproductos'] = producto['imgproductos'].decode('utf-8')
+                producto['valorproducto'] = format_currency(producto['valorproducto'], 'COP', locale='es_CO')
+
+            return render_template('/clients/productos_urs.html', productos=productos)
+
+        except Exception as e:
+            print(f"Error al cargar productos: {str(e)}")
+            return jsonify({"success": False, "message": f"Error al cargar productos: {str(e)}"}), 500
 
     else:
-        productos = obtener_productos()
-        for producto in productos:
-            if isinstance(producto['imgproductos'], bytes):
-                producto['imgproductos'] = producto['imgproductos'].decode('utf-8')
-            producto['valorproducto'] = format_currency(producto['valorproducto'], 'COP', locale='es_CO')
+        return jsonify({"success": False, "message": "Método no permitido."}), 405
 
-        return render_template('/clients/productos_urs.html', productos=productos)
-
+    
 @app.route('/guardar_pedido', methods=['POST'])
 def guardar_pedido():
-    productos = session.get('carrito', [])
+    data = request.get_json()
+
+    if not data or 'carrito' not in data:
+        return jsonify({'success': False, 'message': 'Faltan campos necesarios en la solicitud.'})
+
+    productos = json.loads(data['carrito'])
+
     if not productos:
         return jsonify({'success': False, 'message': 'El carrito está vacío'})
 
@@ -121,9 +174,7 @@ def guardar_pedido():
         return jsonify({'success': False, 'message': 'Usuario no autenticado'})
 
     def normalizar_precio(precio):
-        # Eliminar puntos como separadores de miles y reemplazar coma por punto
         precio_limpio = precio.replace('.', '').replace(',', '.')
-        # Eliminar símbolo de moneda si está presente
         if precio_limpio.startswith('$'):
             precio_limpio = precio_limpio[1:]
         return float(precio_limpio)
@@ -139,7 +190,7 @@ def guardar_pedido():
             cursor.execute("SELECT stockinventario FROM inventario WHERE idproducto = %s", (producto['id'],))
             result = cursor.fetchone()
             if result is None:
-                return jsonify({'success': False, 'message': 'Producto no encontrado en el inventario'})
+                return jsonify({'success': False, 'message': f'Producto con ID {producto["id"]} no encontrado en el inventario'})
 
             stock_actual = result[0]
             if stock_actual < int(producto['cantidad']):
@@ -147,9 +198,9 @@ def guardar_pedido():
 
         # Insertar la venta en la tabla ventas
         cursor.execute("""
-            INSERT INTO ventas (fechaventa, precioventa, estadoventa, totalventa, idusuario, idproducto)
-            VALUES (%s, %s, %s, %s, %s, %s)
-        """, (datetime.now().date(), total_venta, 'ESPERA', total_venta, session['user_id'], productos[0]['id']))  # Usamos el primer producto para idproducto
+            INSERT INTO ventas (fechaventa, precioventa, estadoventa, totalventa, idusuario)
+            VALUES (%s, %s, %s, %s, %s)
+        """, (datetime.now().date(), total_venta, 'ESPERA', total_venta, session['user_id']))
         venta_id = cursor.lastrowid
 
         # Guardar detalles de los productos en la tabla detalleventas y actualizar el stock
@@ -159,7 +210,6 @@ def guardar_pedido():
                 VALUES (%s, %s, %s)
             """, (venta_id, int(producto['cantidad']), normalizar_precio(producto['precio']) * int(producto['cantidad'])))
 
-            # Actualizar el stock en la tabla inventario
             cursor.execute("""
                 UPDATE inventario
                 SET stockinventario = stockinventario - %s
@@ -173,10 +223,9 @@ def guardar_pedido():
     finally:
         cursor.close()
 
-    session.pop('carrito', None)  # Limpiar el carrito después de guardar el pedido
+    session.pop('carrito', None)
 
     return jsonify({'success': True, 'message': 'Pedido guardado correctamente'})
-
 
 @app.route('/nosotros')
 def nosotros():
@@ -330,13 +379,16 @@ def ventas():
     """)
     ventas = cursor.fetchall()
     cursor.close()
+    db.close()  # Asegúrate de cerrar la conexión a la base de datos
 
     return render_template('ventas.html', ventas=ventas)
-
 
 @app.route('/comprobante/<int:id>')
 def obtener_comprobante(id):
     db = get_db()
+    if db is None:
+        return jsonify({'success': False, 'message': 'Error de conexión a la base de datos'}), 500
+
     cursor = db.cursor(dictionary=True)
     
     try:
@@ -350,8 +402,6 @@ def obtener_comprobante(id):
         print("Venta obtenida:", venta)  # Mensaje de depuración
 
         if not venta:
-            cursor.close()
-            print("Venta no encontrada")  # Mensaje de depuración
             return jsonify({'success': False, 'message': 'Venta no encontrada'}), 404
 
         cursor.execute("""
@@ -364,15 +414,15 @@ def obtener_comprobante(id):
         detalles = cursor.fetchall()
         print("Detalles obtenidos:", detalles)  # Mensaje de depuración
 
+        return jsonify({'success': True, 'venta': venta, 'detalles': detalles})
+
     except mysql.connector.Error as err:
         print("Error en la consulta:", err)  # Mensaje de depuración
         return jsonify({'success': False, 'message': 'Error en la consulta: {}'.format(err)}), 500
 
     finally:
         cursor.close()
-    
-    return jsonify({'success': True, 'venta': venta, 'detalles': detalles})
-
+        db.close()  # Asegúrate de cerrar la conexión a la base de datos
 @app.route('/actualizarEstadoVenta/<int:id>', methods=['PUT'])
 def actualizar_estado_venta(id):
     try:

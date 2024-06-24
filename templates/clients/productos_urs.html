@@ -51,29 +51,30 @@
 <!--Catalogo de productos-->
 <!-- Contenido de la sección de productos -->
 <section class="contenedor contenedor-productos">
-    <div class="titulo contenedor">
-        <h2>Todos los Productos</h2>
-    </div>
-    <div class="contenedor-items">
-        {% for producto in productos %}
-        <div class="item">
-            <span class="titulo-item">{{ producto['nombreproducto'] }}</span>
-            {% if producto['imgproductos'] %}
-            <img src="{{ url_for('static', filename='uploads/' + producto['imgproductos']) }}" alt="{{ producto['nombreproducto'] }}" class="img-item">
-            {% else %}
-            <p>No hay imagen disponible</p>
-            {% endif %}
-            <span class="precio-item">{{ producto['valorproducto'] }}</span>
-            <form class="agregar-carrito-form">
-                <input type="hidden" name="id_producto" value="{{ producto['idproducto'] }}">
-                <input type="hidden" name="nombre_producto" value="{{ producto['nombreproducto'] }}">
-                <input type="hidden" name="precio_producto" value="{{ producto['valorproducto'] }}">
-                <button type="button" class="btn-2">Agregar al Carrito</button>
-            </form>
+        <div class="titulo contenedor">
+            <h2>Todos los Productos</h2>
         </div>
-        {% endfor %}
-    </div>
-</section>
+        <div class="contenedor-items">
+            {% for producto in productos %}
+            <div class="item">
+                <span class="titulo-item">{{ producto['nombreproducto'] }}</span>
+                {% if producto['imgproductos'] %}
+                <img src="{{ url_for('static', filename='uploads/' + producto['imgproductos']) }}"
+                    alt="{{ producto['nombreproducto'] }}" class="img-item">
+                {% else %}
+                <p>No hay imagen disponible</p>
+                {% endif %}
+                <span class="precio-item">{{ producto['valorproducto'] }}</span>
+                <form method="POST">
+                    <input type="hidden" name="id_producto" value="{{ producto['idproducto'] }}">
+                    <input type="hidden" name="nombre_producto" value="{{ producto['nombreproducto'] }}">
+                    <input type="hidden" name="precio_producto" value="{{ producto['valorproducto'] }}">
+                    <a class="btn-2 agregar-carrito" href="{{ url_for ('inicioSesion')}}">Agregar al carrito</a>
+                </form>
+            </div>
+            {% endfor %}
+        </div>
+    </section>
 
 <!-- Contenedor del carrito -->
 <div class="contenedor contenedor-carrito">
@@ -85,10 +86,8 @@
             <!-- Aquí se mostrarán los productos del carrito -->
         </div>
         <div class="carrito-total">
-            <div class="fila">
-                <strong>Tu Total</strong>
-                <span class="carrito-precio-total">$0</span>
-            </div>
+            <strong class="carrito-total-titulo">Total</strong>
+            <span class="carrito-total-precio">$0.00</span>
             <form id="guardar-pedido-form" method="POST">
                 <input type="hidden" name="action" value="guardar_pedido">
                 <button type="submit" class="btn-pagar">Guardar Pedido<i class="fa-solid fa-bag-shopping"></i></button>
@@ -96,6 +95,7 @@
         </div>
     </div>
 </div>
+
 
 
 

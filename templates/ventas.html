@@ -88,7 +88,7 @@
             </div>
         </section>
     </section>
-
+    
     <!-- Modal -->
     <div id="modalComprobante" class="modal" style="display:none;">
         <div class="modal-content">
@@ -100,27 +100,27 @@
             <button onclick="imprimirComprobante()">Imprimir Comprobante</button>
         </div>
     </div>
-
+    
     <script>
-        function generarComprobante(idVenta) {
-            console.log('Generando comprobante para la venta con ID:', idVenta);
-            fetch('/comprobante/' + idVenta)
-                .then(response => {
-                    console.log('Respuesta de la solicitud fetch:', response); // Mensaje de depuración
-                    if (!response.ok) {
-                        throw new Error('Network response was not ok ' + response.statusText);
-                    }
-                    return response.json();
-                })
-                .then(data => {
-                    console.log('Respuesta del servidor:', data); // Mensaje de depuración
-                    if (data.success) {
-                        const detalleComprobante = document.getElementById('detalleComprobante');
-                        detalleComprobante.innerHTML = `
+   function generarComprobante(idVenta) {
+    console.log('Generando comprobante para la venta con ID:', idVenta);
+    fetch('/comprobante/' + idVenta)
+        .then(response => {
+            console.log('Respuesta de la solicitud fetch:', response); // Mensaje de depuración
+            if (!response.ok) {
+                throw new Error('Network response was not ok ' + response.statusText);
+            }
+            return response.json();
+        })
+        .then(data => {
+            console.log('Respuesta del servidor:', data); // Mensaje de depuración
+            if (data.success) {
+                const detalleComprobante = document.getElementById('detalleComprobante');
+                detalleComprobante.innerHTML = `
                     <p>ID Venta: ${data.venta.idventa}</p>
                     <p>Nombre Usuario: ${data.venta.nombreusuario}</p>
                     <p>Fecha Venta: ${data.venta.fechaventa}</p>
-                    <p>Estado Venta: VENDIDO</p>
+                    <p>Estado Venta: ${data.venta.estadoventa}</p>
                     <p>Total Venta: ${data.venta.totalventa}</p>
                     <h2>Detalles de la Venta</h2>
                     <table class="table">
@@ -142,50 +142,55 @@
                         </tbody>
                     </table>
                 `;
-                        document.getElementById('modalComprobante').style.display = 'block';
-                    } else {
-                        alert('Error al obtener el comprobante: ' + data.message);
-                    }
-                })
-                .catch(error => {
-                    console.error('Error en la solicitud:', error); // Mensaje de depuración
-                    alert('Error al obtener el comprobante.');
-                });
-        }
+                document.getElementById('modalComprobante').style.display = 'block';
+            } else {
+                alert('Error al obtener el comprobante: ' + data.message);
+            }
+        })
+        .catch(error => {
+            console.error('Error en la solicitud:', error); // Mensaje de depuración
+            alert('Error al obtener el comprobante.');
+        });
+}
 
-        function cerrarModal() {
-            document.getElementById('modalComprobante').style.display = 'none';
-        }
+function cerrarModal() {
+    document.getElementById('modalComprobante').style.display = 'none';
+}
 
-        function imprimirComprobante() {
-            const printContents = document.getElementById('detalleComprobante').innerHTML;
-            const originalContents = document.body.innerHTML;
-            document.body.innerHTML = printContents;
-            window.print();
-            document.body.innerHTML = originalContents;
-            window.location.reload(); // Recargar la página para restaurar el contenido original
+function imprimirComprobante() {
+    const printContents = document.getElementById('detalleComprobante').innerHTML;
+    const originalContents = document.body.innerHTML;
+    document.body.innerHTML = printContents;
+    window.print();
+    document.body.innerHTML = originalContents;
+    window.location.reload(); // Recargar la página para restaurar el contenido original
 
-            // Obtener el id de la venta del detalle del comprobante
-            const idVenta = document.querySelector('#detalleComprobante p:nth-child(1)').textContent.split(' ')[2];
+    // Obtener el id de la venta del detalle del comprobante
+    const idVenta = document.querySelector('#detalleComprobante p:nth-child(1)').textContent.split(' ')[2];
 
-            // Realizar la solicitud para actualizar el estado de la venta
-            fetch('/actualizarEstadoVenta/' + idVenta, {
-                method: 'PUT',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ estado: 'VENDIDO' })
-            })
-                .then(response => response.json())
-                .then(data => {
-                    console.log('Estado de venta actualizado:', data);
-                    // Puedes manejar la respuesta según lo necesites
-                })
-                .catch(error => {
-                    console.error('Error al actualizar el estado de la venta:', error);
-                    // Puedes mostrar una alerta u otro mensaje de error
-                });
-        }
+    // Realizar la solicitud para actualizar el estado de la venta
+    fetch('/actualizarEstadoVenta/' + idVenta, {
+        method: 'PUT',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ estado: 'VENDIDO' })
+    })
+        .then(response => {
+            if (!response.ok) {
+                throw new Error('Network response was not ok ' + response.statusText);
+            }
+            return response.json();
+        })
+        .then(data => {
+            console.log('Estado de venta actualizado:', data); // Mensaje de depuración
+            // Puedes manejar la respuesta según lo necesites
+        })
+        .catch(error => {
+            console.error('Error al actualizar el estado de la venta:', error); // Mensaje de depuración
+            alert('Error al actualizar el estado de la venta.');
+        });
+}
 
     </script>
 
