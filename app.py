@@ -165,8 +165,6 @@ def guardar_pedido():
         return jsonify({'success': False, 'message': 'Faltan campos necesarios en la solicitud.'})
 
     # Depuración para verificar el contenido de 'carrito'
-    print(f"Contenido de 'carrito': {data['carrito']}")
-
     try:
         productos = json.loads(data['carrito'])
     except json.JSONDecodeError as e:
@@ -190,7 +188,11 @@ def guardar_pedido():
     cursor = conn.cursor()
 
     try:
+        # Comenzar la transacción
+        conn.start_transaction()
+
         for producto in productos:
+            # Verificar stock disponible
             cursor.execute("SELECT stockinventario FROM inventario WHERE idproducto = %s", (producto['id'],))
             result = cursor.fetchone()
             if result is None:
@@ -200,6 +202,7 @@ def guardar_pedido():
             if stock_actual < int(producto['cantidad']):
                 return jsonify({'success': False, 'message': f'No hay suficiente stock para el producto {producto["nombre"]}. Stock actual: {stock_actual}'})
 
+        # Insertar en la tabla de ventas
         cursor.execute("""
             INSERT INTO ventas (fechaventa, precioventa, estadoventa, totalventa, idusuario, idproducto)
             VALUES (%s, %s, %s, %s, %s, %s)
@@ -207,19 +210,28 @@ def guardar_pedido():
         venta_id = cursor.lastrowid
 
         for producto in productos:
+            # Insertar en la tabla de detalle de ventas
             cursor.execute("""
                 INSERT INTO detalleventas (idventa, cantidadproducto, subtotaldetalleventa)
                 VALUES (%s, %s, %s)
             """, (venta_id, int(producto['cantidad']), normalizar_precio(producto['precio']) * int(producto['cantidad'])))
 
+            # Actualizar inventario
             cursor.execute("""
                 UPDATE inventario
                 SET stockinventario = stockinventario - %s
                 WHERE idproducto = %s
             """, (int(producto['cantidad']), producto['id']))
 
+            # Depuración: Verifica que la actualización se realizó
+            cursor.execute("SELECT stockinventario FROM inventario WHERE idproducto = %s", (producto['id'],))
+            updated_stock = cursor.fetchone()[0]
+            print(f"Nuevo stock para el producto ID {producto['id']}: {updated_stock}")
+
+        # Confirmar la transacción
         conn.commit()
     except mysql.connector.Error as err:
+        # Revertir la transacción en caso de error
         conn.rollback()
         return jsonify({'success': False, 'message': 'Error al guardar el pedido: {}'.format(err)})
     finally:
