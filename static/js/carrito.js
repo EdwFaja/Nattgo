@@ -28,6 +28,11 @@ function agregarAlCarritoClicked(event) {
         if (data.success) {
             agregarItemAlCarrito(data.producto.nombre, data.producto.precio, form.closest('.item').querySelector('.img-item').src);
             actualizarTotalCarrito();
+
+            // Actualizar el carrito en sessionStorage
+            let carrito = JSON.parse(sessionStorage.getItem('carrito')) || [];
+            carrito.push(data.producto);
+            sessionStorage.setItem('carrito', JSON.stringify(carrito));
         } else {
             alert("Error al agregar el producto al carrito: " + data.message);
         }
@@ -36,6 +41,7 @@ function agregarAlCarritoClicked(event) {
         alert('Error al agregar el producto al carrito.');
     });
 }
+
 
 function agregarItemAlCarrito(titulo, precio, imagenSrc) {
     var itemCarritoNuevo = document.createElement('div');
@@ -105,13 +111,14 @@ function sumarCantidad(event) {
 }
 
 function pagarClicked() {
-    var carritoItems = document.getElementsByClassName('carrito-items')[0].innerHTML;
+    let carrito = JSON.parse(sessionStorage.getItem('carrito')) || [];
+
     fetch('/guardar_pedido', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ carrito: sessionStorage.getItem('carrito') })
+        body: JSON.stringify({ carrito: JSON.stringify(carrito) })
     }).then(response => response.json())
     .then(data => {
         if (data.success) {
@@ -135,3 +142,4 @@ function pagarClicked() {
         alert('Error al realizar el pedido.');
     });
 }
+

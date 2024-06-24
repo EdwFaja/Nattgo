@@ -101,19 +101,17 @@ def productos_urs():
         nombre_producto = request.form.get('nombre_producto')
         precio_producto = request.form.get('precio_producto')
 
-        # Verificar si todos los campos necesarios están presentes
         if not producto_id or not nombre_producto or not precio_producto:
             return jsonify({"success": False, "message": "Faltan campos necesarios en la solicitud."}), 400
 
-        # Validar que el ID del producto sea un número entero válido
         try:
             producto_id = int(producto_id)
         except ValueError:
             return jsonify({"success": False, "message": "ID de producto inválido."}), 400
 
-        # Verificar si el producto con ese ID existe en el inventario y su stock
         try:
-            cursor = database.cursor(dictionary=True)
+            conn = get_db()
+            cursor = conn.cursor(dictionary=True)
             cursor.execute("SELECT stockinventario FROM inventario WHERE idproducto = %s", (producto_id,))
             stock = cursor.fetchone()
 
@@ -124,7 +122,6 @@ def productos_urs():
             if stock_disponible < 1:
                 return jsonify({"success": False, "message": f"No hay suficiente stock para el producto {nombre_producto}. Stock actual: {stock_disponible}"}), 400
 
-            # Preparar el objeto del producto para agregar al carrito
             item_carrito = {
                 'id': producto_id,
                 'nombre': nombre_producto,
@@ -142,7 +139,7 @@ def productos_urs():
 
     elif request.method == 'GET':
         try:
-            productos = obtener_productos()  # Asumiendo que tienes una función obtener_productos() definida
+            productos = obtener_productos()
             for producto in productos:
                 if isinstance(producto['imgproductos'], bytes):
                     producto['imgproductos'] = producto['imgproductos'].decode('utf-8')
@@ -157,15 +154,23 @@ def productos_urs():
     else:
         return jsonify({"success": False, "message": "Método no permitido."}), 405
 
-    
 @app.route('/guardar_pedido', methods=['POST'])
 def guardar_pedido():
     data = request.get_json()
 
-    if not data or 'carrito' not in data:
+    # Depuración para verificar el contenido de 'data'
+    print(f"Contenido de 'data': {data}")
+
+    if not data or 'carrito' not in data or data['carrito'] is None:
         return jsonify({'success': False, 'message': 'Faltan campos necesarios en la solicitud.'})
 
-    productos = json.loads(data['carrito'])
+    # Depuración para verificar el contenido de 'carrito'
+    print(f"Contenido de 'carrito': {data['carrito']}")
+
+    try:
+        productos = json.loads(data['carrito'])
+    except json.JSONDecodeError as e:
+        return jsonify({'success': False, 'message': 'Formato de JSON inválido en el carrito.'}), 400
 
     if not productos:
         return jsonify({'success': False, 'message': 'El carrito está vacío'})
@@ -181,11 +186,10 @@ def guardar_pedido():
 
     total_venta = sum(normalizar_precio(p['precio']) * int(p['cantidad']) for p in productos)
 
-    db = get_db()
-    cursor = db.cursor()
+    conn = get_db()
+    cursor = conn.cursor()
 
     try:
-        # Verificar el stock de cada producto antes de guardar la venta
         for producto in productos:
             cursor.execute("SELECT stockinventario FROM inventario WHERE idproducto = %s", (producto['id'],))
             result = cursor.fetchone()
@@ -196,14 +200,12 @@ def guardar_pedido():
             if stock_actual < int(producto['cantidad']):
                 return jsonify({'success': False, 'message': f'No hay suficiente stock para el producto {producto["nombre"]}. Stock actual: {stock_actual}'})
 
-        # Insertar la venta en la tabla ventas
         cursor.execute("""
-            INSERT INTO ventas (fechaventa, precioventa, estadoventa, totalventa, idusuario)
-            VALUES (%s, %s, %s, %s, %s)
-        """, (datetime.now().date(), total_venta, 'ESPERA', total_venta, session['user_id']))
+            INSERT INTO ventas (fechaventa, precioventa, estadoventa, totalventa, idusuario, idproducto)
+            VALUES (%s, %s, %s, %s, %s, %s)
+        """, (datetime.now().date(), total_venta, 'ESPERA', total_venta, session['user_id'], productos[0]['id']))
         venta_id = cursor.lastrowid
 
-        # Guardar detalles de los productos en la tabla detalleventas y actualizar el stock
         for producto in productos:
             cursor.execute("""
                 INSERT INTO detalleventas (idventa, cantidadproducto, subtotaldetalleventa)
@@ -216,9 +218,9 @@ def guardar_pedido():
                 WHERE idproducto = %s
             """, (int(producto['cantidad']), producto['id']))
 
-        db.commit()
+        conn.commit()
     except mysql.connector.Error as err:
-        db.rollback()
+        conn.rollback()
         return jsonify({'success': False, 'message': 'Error al guardar el pedido: {}'.format(err)})
     finally:
         cursor.close()
